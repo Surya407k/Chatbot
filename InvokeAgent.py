@@ -170,6 +170,7 @@ if end_session_button:
 # Display conversation history
 st.write("## Conversation History")
 
+python_icon = "🐍"
 human_image = Image.open('images/human_face.png')
 robot_image = Image.open('images/robot_face.jpg')
 circular_human_image = crop_to_circle(human_image)
@@ -178,18 +179,18 @@ circular_robot_image = crop_to_circle(robot_image)
 for index, chat in enumerate(reversed(st.session_state['history'])):
     col1_q, col2_q = st.columns([2, 10])
     with col1_q:
-        st.image(circular_human_image, width=125)
+        st.image(circular_human_image, width=125, caption=python_icon)
     with col2_q:
         st.text_area("Q:", value=chat["question"], height=50, key=f"question_{index}", disabled=True)
 
     col1_a, col2_a = st.columns([2, 10])
     if isinstance(chat["answer"], pd.DataFrame):
         with col1_a:
-            st.image(circular_robot_image, width=100)
+            st.image(circular_robot_image, width=100, caption=python_icon)
         with col2_a:
             st.dataframe(chat["answer"], key=f"answer_df_{index}")
     else:
         with col1_a:
-            st.image(circular_robot_image, width=150)
+            st.image(circular_robot_image, width=150, caption=python_icon)
         with col2_a:
             st.text_area("A:", value=chat["answer"], height=100, key=f"answer_{index}")
