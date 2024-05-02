@@ -1,11 +1,27 @@
+from boto3.session import Session
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.credentials import Credentials
+import json
+import os
+from requests import request
+import base64
+import io
+import sys
 import InvokeAgent as agenthelper
 import streamlit as st
-import json
 import pandas as pd
 from PIL import Image, ImageOps, ImageDraw
+import requests
+
+# Constants
+agentId = "MY8SXCS91N"  # INPUT YOUR AGENT ID HERE
+agentAliasId = "MTGL815AGD"  # Hits draft alias, set to a specific alias id for a deployed version
+theRegion = "us-west-2"
+os.environ["AWS_REGION"] = theRegion
 
 # Streamlit page configuration
-st.set_page_config(page_title="Co. Portfolio Creator", page_icon=":robot_face:", layout="wide")
+st.set_page_config(page_title="Sciphics Technology Private Limited", page_icon=":robot_face:", layout="wide")
 
 # Function to crop image into a circle
 def crop_to_circle(image):
@@ -17,7 +33,7 @@ def crop_to_circle(image):
     return result
 
 # Title
-st.title("Co. Portfolio Creator")
+st.title("Sciphics Technology Private Limited")
 
 # Display a text box for input
 prompt = st.text_input("Please enter your query?", max_chars=2000)
@@ -63,25 +79,25 @@ if submit_button and prompt:
         "question": prompt
     }
     response = agenthelper.lambda_handler(event, None)
-    
+
     try:
         # Parse the JSON string
         if response and 'body' in response and response['body']:
             response_data = json.loads(response['body'])
-            print("TRACE & RESPONSE DATA ->  ", response_data)
+            print("TRACE & RESPONSE DATA -> ", response_data)
         else:
             print("Invalid or empty response received")
     except json.JSONDecodeError as e:
         print("JSON decoding error:", e)
-        response_data = None 
-    
+        response_data = None
+
     try:
         # Extract the response and trace data
         all_data = format_response(response_data['response'])
         the_response = response_data['trace_data']
     except:
-        all_data = "..." 
-        the_response = "Apologies, but an error occurred. Please rerun the application" 
+        all_data = "..."
+        the_response = "Apologies, but an error occurred. Please rerun the application"
 
     # Use trace_data and formatted_response as needed
     st.sidebar.text_area("", value=all_data, height=300)
@@ -102,70 +118,162 @@ if end_session_button:
 st.write("## Conversation History")
 
 # Load images outside the loop to optimize performance
-human_image = Image.open('images/human_face.png')
-robot_image = Image.open('images/robot_face.jpg')
-circular_human_image = crop_to_circle(human_image)
-circular_robot_image = crop_to_circle(robot_image)
+human_image_url = "https://www.cryptopolitan.com/wp-content/uploads/20"
 
-for index, chat in enumerate(reversed(st.session_state['history'])):
-    # Creating columns for Question
-    col1_q, col2_q = st.columns([2, 10])
-    with col1_q:
-        st.image(circular_human_image, width=125)
-    with col2_q:
-        # Generate a unique key for each question text area
-        st.text_area("Q:", value=chat["question"], height=50, key=f"question_{index}", disabled=True)
+# AWS Code and Functions
+def sigv4_request(
+    url,
+    method='GET',
+    body=None,
+    params=None,
+    headers=None,
+    service='execute-api',
+    region=os.environ['AWS_REGION'],
+    credentials=Session().get_credentials().get_frozen_credentials()
+):
+    """Sends an HTTP request signed with SigV4
+    Args:
+    url: The request URL (e.g. 'https://www.example.com').
+    method: The request method (e.g. 'GET', 'POST', 'PUT', 'DELETE'). Defaults to 'GET'.
+    body: The request body (e.g. json.dumps({ 'foo': 'bar' })). Defaults to None.
+    params: The request query params (e.g. { 'foo': 'bar' }). Defaults to None.
+    headers: The request headers (e.g. { 'content-type': 'application/json' }). Defaults to None.
+    service: The AWS service name. Defaults to 'execute-api'.
+    region: The AWS region id. Defaults to the env var 'AWS_REGION'.
+    credentials: The AWS credentials. Defaults to the current boto3 session's credentials.
+    Returns:
+     The HTTP response
+    """
 
-    # Creating columns for Answer
-    col1_a, col2_a = st.columns([2, 10])
-    if isinstance(chat["answer"], pd.DataFrame):
-        with col1_a:
-            st.image(circular_robot_image, width=100)
-        with col2_a:
-            # Generate a unique key for each answer dataframe
-            st.dataframe(chat["answer"], key=f"answer_df_{index}")
+    # sign request
+    req = AWSRequest(
+        method=method,
+        url=url,
+        data=body,
+        params=params,
+        headers=headers
+    )
+    SigV4Auth(credentials, service, region).add_auth(req)
+    req = req.prepare()
+
+    # send request
+    return request(
+        method=req.method,
+        url=req.url,
+        headers=req.headers,
+        data=req.body
+    )
+
+
+def askQuestion(question, url, endSession=False):
+    myobj = {
+        "inputText": question,
+        "enableTrace": True,
+        "endSession": endSession
+    }
+
+    # send request
+    response = sigv4_request(
+        url,
+        method='POST',
+        service='bedrock',
+        headers={
+            'content-type': 'application/json',
+            'accept': 'application/json',
+        },
+        region=theRegion,
+        body=json.dumps(myobj)
+    )
+
+    return decode_response(response)
+
+
+def decode_response(response):
+    # Create a StringIO object to capture print statements
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+
+    # Your existing logic
+    string = ""
+    for line in response.iter_content():
+        try:
+            string += line.decode(encoding='utf-8')
+        except:
+            continue
+
+    print("Decoded response", string)
+    split_response = string.split(":message-type")
+    print(f"Split Response: {split_response}")
+    print(f"length of split: {len(split_response)}")
+
+    for idx in range(len(split_response)):
+        if "bytes" in split_response[idx]:
+            #print(f"Bytes found index {idx}")
+            encoded_last_response = split_response[idx].split("\"")[3]
+            decoded = base64.b64decode(encoded_last_response)
+            final_response = decoded.decode('utf-8')
+            print(final_response)
+        else:
+            print(f"no bytes at index {idx}")
+            print(split_response[idx])
+
+    last_response = split_response[-1]
+    print(f"Lst Response: {last_response}")
+    if "bytes" in last_response:
+        print("Bytes in last response")
+        encoded_last_response = last_response.split("\"")[3]
+        decoded = base64.b64decode(encoded_last_response)
+        final_response = decoded.decode('utf-8')
     else:
-        with col1_a:
-            st.image(circular_robot_image, width=150)
-        with col2_a:
-            # Generate a unique key for each answer text area
-            st.text_area("A:", value=chat["answer"], height=100, key=f"answer_{index}")
+        print("no bytes in last response")
+        part1 = string[string.find('finalResponse')+len('finalResponse":'):]
+        part2 = part1[:part1.find('"}')+2]
+        final_response = json.loads(part2)['text']
 
-# Example Prompts Section
-st.write("## Test Knowledge Base Prompts")
+    final_response = final_response.replace("\"", "")
+    final_response = final_response.replace("{input:{value:", "")
+    final_response = final_response.replace(",source:null}}", "")
+    llm_response = final_response
 
-# Creating a list of prompts for the Knowledge Base section
-knowledge_base_prompts = [
-    {"Prompt": "Give me a summary of financial market developments and open market operations in January 2023"},
-    {"Prompt": "Tell me the participants view on economic conditions and economic outlook"},
-    {"Prompt": "Provide any important information I should know about consumer inflation, or rising prices"},
-    {"Prompt": "Tell me about the Staff Review of the Economic & financial Situation"}
-]
+    # Restore original stdout
+    sys.stdout = sys.__stdout__
 
-# Displaying the Knowledge Base prompts as a table
-st.table(knowledge_base_prompts)
+    # Get the string from captured output
+    captured_string = captured_output.getvalue()
 
-# Test Action Group Prompts
-st.write("## Test Action Group Prompts")
+    # Return both the captured output and the final response
+    return captured_string, llm_response
 
-# Creating a list of prompts for the Action Group section
-action_group_prompts = [
-    {"Prompt": "Create a portfolio with 3 companies in the real estate industry"},
-    {"Prompt": "Create a portfolio of 4 companies that are in the technology industry"},
-    {"Prompt": "Create a new investment portfolio of companies"},
-    {"Prompt": "Do company research on TechStashNova Inc."}
-]
 
-# Displaying the Action Group prompts as a table
-st.table(action_group_prompts)
+def lambda_handler(event, context):
 
-st.write("## Test KB, AG, History Prompt")
+    sessionId = event["sessionId"]
+    question = event["question"]
+    endSession = False
 
-# Creating a list of prompts for the specific task
-task_prompts = [
-    {"Task": "Send an email to test@example.com that includes the company portfolio and summary report", 
-     "Note": "The logic for this method is not implemented to send emails"}
-]
+    print(f"Session: {sessionId} asked question: {question}")
 
-# Displaying the task prompt as a table
-st.table(task_prompts)
+    try:
+        if (event["endSession"] == "true"):
+            endSession = True
+    except:
+        endSession = False
+
+    url = f'https://bedrock-agent-runtime.{theRegion}.amazonaws.com/agents/{agentId}/agentAliases/{agentAliasId}/sessions/{sessionId}/text'
+
+
+    try:
+        response, trace_data = askQuestion(question, url, endSession)
+        return {
+            "status_code": 200,
+            "body": json.dumps({"response": response, "trace_data": trace_data})
+        }
+    except Exception as e:
+        return {
+            "status_code": 500,
+            "body": json.dumps({"error": str(e)})
+        }
+
+# Main function
+if __name__ == "__main__":
+    lambda_handler({"sessionId": "test_session_id", "question": "test_question"}, None)
