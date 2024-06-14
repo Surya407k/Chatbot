@@ -71,7 +71,7 @@ def display_chat_history():
 
 def main():
     st.set_page_config("Chat PDF")
-    st.header("Chat with PDF using Gemini💁")
+    st.header("Chat with Sciphics💁")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
