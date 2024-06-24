@@ -7,3 +7,4 @@ langchain-community
 huggingface-hub
 sentence_transformers
 transformers
+load_dotenv
